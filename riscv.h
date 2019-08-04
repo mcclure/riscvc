@@ -5,73 +5,73 @@
 // Bits filled out from diagram in riscv-spec unprivileged, 20190621-draft, sec 2.3
 
 // All instructions
-#define OPCODE 0
+#define OPCODE    0
 #define OPCODE_TO 6
 
 // R, I, U, J
-#define RD 7
+#define RD     7
 #define RD_TO 11
 
 // R, I, S, B
-#define FUNCT3 12
-#define FUNCT4 14
-#define RS1 15
+#define FUNCT3    12
+#define FUNCT3_TO 14
+#define RS1    15
 #define RS1_TO 19
 
 // R, S, B
-#define RS2  20
+#define RS2    20
 #define RS2_TO 24
 
 // R
-#define FUNCT7 25
+#define FUNCT7    25
 #define FUNCT7_TO 31
 
 // I
 
-#define IMMI 20
+#define IMMI    20
 #define IMMI_TO 24
 
 // SYSTEM (I)
 
-#define FUNCT12 20
+#define FUNCT12    20
 #define FUNCT12_TO 24
 
 // S
 
-#define IMMS1 7
+#define IMMS1     7
 #define IMMS1_TO 11
-#define IMMS2 25
+#define IMMS2    25
 #define IMMS2_TO 31
 
 // B
 
-#define IMMB1 8
+#define IMMB1     8
 #define IMMB1_TO 11
-#define IMMB2 25
+#define IMMB2    25
 #define IMMB2_TO 30
-#define IMMB3 7
+#define IMMB3    7
 #define IMMB3_TO 7
-#define IMMB4 31
+#define IMMB4    31
 #define IMMB4_TO 31
 
 // U
 
-#define IMMU 12
+#define IMMU    12
 #define IMMU_TO 31
 
 // J
 
-#define IMMJ1 21
+#define IMMJ1    21
 #define IMMJ1_TO 30 
-#define IMMJ2 20
+#define IMMJ2    20
 #define IMMJ2_TO 20 
-#define IMMJ3 12
+#define IMMJ3    12
 #define IMMJ3_TO 19 
-#define IMMJ4 31
+#define IMMJ4    31
 #define IMMJ4_TO 31 
 
-#define VREAD(FIELD)
-#define VWRIT(FIELD, VALUE)
+#define VREAD(VAR, FIELD)
+#define VWRIT(VAR, FIELD, VALUE)
 
 // Opcodes
 

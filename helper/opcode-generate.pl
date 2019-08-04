@@ -98,14 +98,14 @@ for(<FH>) { # Scan line by line
 					$dataOpcodeArray = [];
 					$dataOpcodes{$opcode} = $dataOpcodeArray;
 				}
-				my $dataOpcode = {}; # Description of this instruction
+				my $dataOpcode = {instr => $row{instr}}; # Description of this instruction
 				push(@$dataOpcodeArray, $dataOpcode);
 
 				my $signatureCode = $row{signature}; # Signature code
 				my $signature = $signatureIs{$signatureCode}; # Signature letter
 				my $roughSignature = $signature; # Delete this line
 				if (!$signature) { die "For $row{instr} unrecognized signature code $signatureCode" }
-				elsif ($opcode eq "SYSTEM") {
+				elsif ($opcode eq "SYSTEM") { # SYSTEM is formatted like an I
 					$signature = "SYSTEM";
 				} elsif ($signature eq "UJ") {
 					$signature = leftTagFilter($signature, $lastcol, [qw[U J]])
@@ -133,10 +133,16 @@ for(<FH>) { # Scan line by line
 				if ($$lastcol[1] eq "shamt") {
 					$$dataOpcode{shamt} = 1;
 				}
+				if ($kindOpcode{$opcode}) {
+					my $firstInstr = $$dataOpcodeArray[0];
+					($kindOpcode{$opcode} eq $signature) or die "$opcode estimated to have signature $kindOpcode{$opcode} for instruction $$firstInstr{instr} but $signature for instruction $row{instr}";
+				} else {
+					$kindOpcode{$opcode} = $signature;
+				}
 
-				print "// $row{instr}: $opcode (";
-				print join(", ", @$lastcol);
-				print(") signature: $signature [$roughSignature] funct " . sprintf("0x%02x",$$dataOpcode{funct}) . " shamt:$$dataOpcode{shamt}\n");
+				#print "// $row{instr}: $opcode (";
+				#print join(", ", @$lastcol);
+				#print(") signature: $signature [$roughSignature] funct " . sprintf("0x%02x",$$dataOpcode{funct}) . " shamt:$$dataOpcode{shamt}\n");
 			}
 			resetRow();
 		} elsif (s/.*?\\multicolumn\{([^\}]*)\}//) { # Looking for \multicolumn{a}{b}{c}{d}, want first and last {} group
@@ -152,3 +158,48 @@ for(<FH>) { # Scan line by line
 		resetRow() if ($intable);
 	}
 }
+
+my $name = "empty";
+my $o = "";
+sub o {
+	my ($i, $v) = @_;
+	if ($v) { $o .= ("    "x$i) . $v . "\n"; }
+	else { $o .= "\n"; }
+}
+my $indentOpcode;
+o(0, "void $name(uint32_t instr) {");
+o(1, "switch(VREAD(instr, OPCODE)) {");
+for my $opcode (@seenOpcodes) {
+	if ($indentOpcode) { o(); } else { $indentOpcode = 1; }
+	o(2, "case $opcode: {");
+	my $signature = $kindOpcode{$opcode};
+	my $instrs = $dataOpcodes{$opcode};
+	
+	if (@$instrs > 0) {
+		my $firstInstr = $$instrs[0];
+		my $switchCase = "";
+		for my $funct (["hasFunct3", "FUNCT3"], ["hasFunct7", "FUNCT7", 4], ["hasFunct12", "FUNCT12"]) {
+			my ($functKey, $functName, $shift) = @$funct;
+			if ($$firstInstr{$functKey}) { # Just assume hasFunct properties are the same across entire opcode for now
+				my $sep = ($switchCase ? "" : " | ");
+				my $clause = "VREAD(instr, $functName)";
+				if ($shift) { $clause = "($clause << $shift)"; }
+				$switchCase .= $sep . $clause;
+			}
+		}
+		$switchCase or die "$opcode has multiple instructions, but $$firstInstr{instr} has no functs?";
+
+		o(3, "switch($switchCase) {");
+		
+		for my $instr (@$instrs) {
+			o(4, "case $$instr{funct}: {");
+			o(4, "} break;");
+		}
+
+		o(3, "}");
+	}
+
+	o(2, "} break;");
+}
+o(1, "}");
+o(0, "}");
