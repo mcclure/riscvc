@@ -70,7 +70,7 @@
 
 // Opcodes
 
-// Generated using ./helper/opcode-map.pl from 20190621-draft tex
+// Generated using ./helper/opcode-map.pl from draft-20190621-ec4492f tex
 
 #define LOAD        0x03     // 3
 #define LOAD_FP     0x07     // 7
