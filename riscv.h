@@ -31,6 +31,11 @@
 #define IMMI 20
 #define IMMI_TO 24
 
+// SYSTEM (I)
+
+#define FUNCT12 20
+#define FUNCT12_TO 24
+
 // S
 
 #define IMMS1 7

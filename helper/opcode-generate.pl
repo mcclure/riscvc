@@ -65,10 +65,13 @@ my %kindOpcode = ();  # What instruction decode does each opcode use?
 # Translate the strings of column widths in TeX to instruction type codes that look
 # like the ones in the manual. Needs further translation based on checking for funct7
 # FENCE is a funny variant of "I" with further packing in the immediate
+# SYSTEM is formally I-type but all fields are constant except the immediate,
+#        which the manual describes as a "funct12". This script merges this with funct7.
 my %signatureIs = ("811" => "UJ", "61111" => "I", "421111" => "RSB", "2311111" => "FENCE");
 sub hashWith { map { $_ => 1 } @_ }
-my $hasFunct3 = hashWith(qw(R I S B FENCE));
-my $hasFunct7 = hashWith(qw(R));
+my %hasFunct3 = hashWith(qw(R I S B FENCE));
+my %hasFunct7 = hashWith(qw(R));
+my %hasFunct12 = hashWith(qw(SYSTEM));
 my %leftTag = (S => "imm[11:5]", B => 'imm[12$\\vert$10:5]', U => "imm[31:12]", "J" => 'imm[20$\\vert$10:1$\\vert$11$\\vert$19:12]');
 
 sub isBinary { return $_[0] !~ /[^01]/ }
@@ -102,7 +105,9 @@ for(<FH>) { # Scan line by line
 				my $signature = $signatureIs{$signatureCode}; # Signature letter
 				my $roughSignature = $signature; # Delete this line
 				if (!$signature) { die "For $row{instr} unrecognized signature code $signatureCode" }
-				elsif ($signature eq "UJ") {
+				elsif ($opcode eq "SYSTEM") {
+					$signature = "SYSTEM";
+				} elsif ($signature eq "UJ") {
 					$signature = leftTagFilter($signature, $lastcol, [qw[U J]])
 						or die "For $row{instr} unrecognized immediate code $$lastcol[0]";
 				} elsif ($signature eq "RSB") {
@@ -113,10 +118,25 @@ for(<FH>) { # Scan line by line
 					}
 				}
 
-				my $lastcol = $row{lastcol};
+				if ($hasFunct3{$signature}) {
+					$$dataOpcode{hasFunct3} = 1;
+					$$dataOpcode{funct} |= (binary($$lastcol[-3]));
+				}
+				if ($hasFunct7{$signature}) {
+					$$dataOpcode{hasFunct7} = 1;
+					$$dataOpcode{funct} |= (binary($$lastcol[0]) << 4); # Assume all funct7s also have funct3
+				}
+				if ($hasFunct12{$signature}) {
+					$$dataOpcode{hasFunct12} = 1;
+					$$dataOpcode{funct} |= (binary($$lastcol[0])); # Assume no funct12s have another funct
+				}
+				if ($$lastcol[1] eq "shamt") {
+					$$dataOpcode{shamt} = 1;
+				}
+
 				print "// $row{instr}: $opcode (";
 				print join(", ", @$lastcol);
-				print(") signature: $signature [$roughSignature]\n");
+				print(") signature: $signature [$roughSignature] funct " . sprintf("0x%02x",$$dataOpcode{funct}) . " shamt:$$dataOpcode{shamt}\n");
 			}
 			resetRow();
 		} elsif (s/.*?\\multicolumn\{([^\}]*)\}//) { # Looking for \multicolumn{a}{b}{c}{d}, want first and last {} group
