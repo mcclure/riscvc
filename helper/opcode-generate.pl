@@ -1,5 +1,6 @@
 #!/usr/bin/perl
 use strict;
+use sort 'stable'; # Needed for funny sort later
 
 # Argument is path to opcode-map.tex from https://github.com/riscv/riscv-isa-manual
 my ($path) = @ARGV;
@@ -60,7 +61,6 @@ sub resetRow { %row = ("lastcol" => [], "signature" => ""); }
 
 my @seenOpcodes = (); # Order in which opcodes were first seen in the table
 my %dataOpcodes = (); # Arrays of instruction data sorted by opcode
-my %kindOpcode = ();  # What instruction decode does each opcode use?
 
 # Translate the strings of column widths in TeX to instruction type codes that look
 # like the ones in the manual. Needs further translation based on checking for funct7
@@ -85,6 +85,7 @@ sub leftTagFilter { # Converts RSB -> R, S or B, UJ -> U or J (returns undef for
 	}
 }
 
+# Build @seenOpcodes/%dataOpcodes
 for(<FH>) { # Scan line by line
 	if ($intable) { # Between table title and \end
 		if (/\\end/) { $intable = 0; next; } # Done with entire table
@@ -120,25 +121,22 @@ for(<FH>) { # Scan line by line
 
 				if ($hasFunct3{$signature}) {
 					$$dataOpcode{hasFunct3} = 1;
-					$$dataOpcode{funct} |= (binary($$lastcol[-3]));
+					$$dataOpcode{FUNCT3} |= (binary($$lastcol[-3]));
 				}
 				if ($hasFunct7{$signature}) {
 					$$dataOpcode{hasFunct7} = 1;
-					$$dataOpcode{funct} |= (binary($$lastcol[0]) << 4); # Assume all funct7s also have funct3
+					$$dataOpcode{FUNCT7} |= (binary($$lastcol[0])); # Assume all funct7s also have funct3
 				}
 				if ($hasFunct12{$signature}) {
 					$$dataOpcode{hasFunct12} = 1;
-					$$dataOpcode{funct} |= (binary($$lastcol[0])); # Assume no funct12s have another funct
+					$$dataOpcode{FUNCT12} |= (binary($$lastcol[0])); # Assume no funct12s have another funct
 				}
 				if ($$lastcol[1] eq "shamt") {
 					$$dataOpcode{shamt} = 1;
 				}
-				if ($kindOpcode{$opcode}) {
-					my $firstInstr = $$dataOpcodeArray[0];
-					($kindOpcode{$opcode} eq $signature) or die "$opcode estimated to have signature $kindOpcode{$opcode} for instruction $$firstInstr{instr} but $signature for instruction $row{instr}";
-				} else {
-					$kindOpcode{$opcode} = $signature;
-				}
+
+				$$dataOpcode{instr} = $row{instr};
+				$$dataOpcode{signature} = $signature;
 
 				#print "// $row{instr}: $opcode (";
 				#print join(", ", @$lastcol);
@@ -159,6 +157,12 @@ for(<FH>) { # Scan line by line
 	}
 }
 
+# sort funct3s together
+for my $key (@seenOpcodes) {
+	my $arr = $dataOpcodes{$key};
+	@$arr = sort { $$a{hasFunct3} ? $$a{FUNCT3} <=> $$b{FUNCT3} : 0 } @$arr;
+}
+
 my $name = "empty";
 my $o = "";
 sub o {
@@ -166,40 +170,86 @@ sub o {
 	if ($v) { $o .= ("    "x$i) . $v . "\n"; }
 	else { $o .= "\n"; }
 }
+sub closeSwitch {
+	my ($i, $alreadyBlanked) = @_;
+	o() unless ($alreadyBlanked);
+	o($i+1, "default: {");
+	o($i+2, "// TODO REGISTER ERROR");
+	o($i+1, "} break;");
+	o($i,   "}");
+}
+sub closeSwitch7 {
+	my ($i) = @_;
+	closeSwitch($i+1, 1);
+	o($i,"} break;");
+}
+
 my $indentOpcode;
 o(0, "void $name(uint32_t instr) {");
 o(1, "switch(VREAD(instr, OPCODE)) {");
 for my $opcode (@seenOpcodes) {
 	if ($indentOpcode) { o(); } else { $indentOpcode = 1; }
 	o(2, "case $opcode: {");
-	my $signature = $kindOpcode{$opcode};
 	my $instrs = $dataOpcodes{$opcode};
 	
-	if (@$instrs > 0) {
-		my $firstInstr = $$instrs[0];
-		my $switchCase = "";
-		for my $funct (["hasFunct3", "FUNCT3"], ["hasFunct7", "FUNCT7", 4], ["hasFunct12", "FUNCT12"]) {
-			my ($functKey, $functName, $shift) = @$funct;
-			if ($$firstInstr{$functKey}) { # Just assume hasFunct properties are the same across entire opcode for now
-				my $sep = ($switchCase ? "" : " | ");
-				my $clause = "VREAD(instr, $functName)";
-				if ($shift) { $clause = "($clause << $shift)"; }
-				$switchCase .= $sep . $clause;
+	@$instrs > 0 or die "How did you get here??";
+	my $firstInstr = $$instrs[0];
+	my $topFunct;
+	my $lastTopFunct;
+	if ($$firstInstr{hasFunct3}) { $topFunct = "FUNCT3" }
+	elsif ($$firstInstr{hasFunct12}) { $topFunct = "FUNCT12" }
+
+	my $i = 3;
+
+	if ($topFunct) {
+		o($i, "switch (VREAD(instr, $topFunct)) {");
+		$i++;
+	}
+
+	for my $instr (@$instrs) {
+		o() if $instr != $firstInstr;
+		if ($topFunct) {
+			my $functValue = $$instr{$topFunct};
+			if ($lastTopFunct ne $functValue) {
+				if ($i > 4) {
+					closeSwitch7(4);
+					o();
+					$i = 4;
+				}
+				o($i, sprintf("case 0x%02x:", $functValue));
+				$i++;
+				if ($$instr{hasFunct7}) {
+					o($i, "switch (VREAD(instr, FUNCT7)) {");
+					$i++;
+				}
+				$lastTopFunct = $functValue;
+			}
+			if ($$instr{hasFunct7}) {
+				o($i, sprintf("case 0x%02x:", $$instr{FUNCT7}));
+				$i++;
 			}
 		}
-		$switchCase or die "$opcode has multiple instructions, but $$firstInstr{instr} has no functs?";
 
-		o(3, "switch($switchCase) {");
-		
-		for my $instr (@$instrs) {
-			o(4, "case $$instr{funct}: {");
-			o(4, "} break;");
-		}
+		# CODE HERE
+		o($i, "// $$instr{instr}");
 
-		o(3, "}");
+		o(--$i, "} break;") if ($topFunct);
+	}
+
+	if ($i > 4) {
+		o();
+		closeSwitch7(4);
+	}
+
+	if ($topFunct) {
+		closeSwitch(3);
 	}
 
 	o(2, "} break;");
 }
-o(1, "}");
+closeSwitch(1);
 o(0, "}");
+
+print("$o\n");
+
+print("////// End main.c //////\n\n");
