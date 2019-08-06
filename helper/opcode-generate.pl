@@ -216,7 +216,7 @@ for my $opcode (@seenOpcodes) {
 					o();
 					$i = 4;
 				}
-				o($i, sprintf("case 0x%02x:", $functValue));
+				o($i, sprintf("case 0x%02x: {", $functValue));
 				$i++;
 				if ($$instr{hasFunct7}) {
 					o($i, "switch (VREAD(instr, FUNCT7)) {");
@@ -225,7 +225,7 @@ for my $opcode (@seenOpcodes) {
 				$lastTopFunct = $functValue;
 			}
 			if ($$instr{hasFunct7}) {
-				o($i, sprintf("case 0x%02x:", $$instr{FUNCT7}));
+				o($i, sprintf("case 0x%02x: {", $$instr{FUNCT7}));
 				$i++;
 			}
 		}
