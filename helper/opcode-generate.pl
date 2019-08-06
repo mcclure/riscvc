@@ -65,8 +65,7 @@ my %dataOpcodes = (); # Arrays of instruction data sorted by opcode
 # Translate the strings of column widths in TeX to instruction type codes that look
 # like the ones in the manual. Needs further translation based on checking for funct7
 # FENCE is a funny variant of "I" with further packing in the immediate
-# SYSTEM is formally I-type but all fields are constant except the immediate,
-#        which the manual describes as a "funct12". This script merges this with funct7.
+# SYSTEM is formally I-type but all fields are constant except the immediate, which the manual describes as a "funct12".
 my %signatureIs = ("811" => "UJ", "61111" => "I", "421111" => "RSB", "2311111" => "FENCE");
 sub hashWith { map { $_ => 1 } @_ }
 my %hasFunct3 = hashWith(qw(R I S B FENCE));
@@ -143,13 +142,13 @@ for(<FH>) { # Scan line by line
 				#print(") signature: $signature [$roughSignature] funct " . sprintf("0x%02x",$$dataOpcode{funct}) . " shamt:$$dataOpcode{shamt}\n");
 			}
 			resetRow();
-		} elsif (s/.*?\\multicolumn\{([^\}]*)\}//) { # Looking for \multicolumn{a}{b}{c}{d}, want first and last {} group
-			$row{signature} .= $1;
+		} elsif (s/.*?\\multicolumn\{([^\}]*)\}//) { # Looking for \multicolumn{a}{b}{c}{d}, want first and last {} group.
+			$row{signature} .= $1; # Use the first {} to build the "signature" (see below)
 			my $last = "";
-			while (s/^\s*{([^\}]*)\}//) { $last = $1; }
+			while (s/^\s*{([^\}]*)\}//) { $last = $1; } # Append the final {} to the $lastcol array
 			my $lastcol = $row{lastcol};
 			push(@$lastcol, $last);
-			if (/\s*\&\s*(\S+)/) { $row{instr} = $1; }
+			if (/\s*\&\s*(\S+)/) { $row{instr} = $1; } # The space after the & is always empty but the last line puts the instruction name there
 		}
 	} else { # Search for start of table
 		$intable = /RV32I Base Instruction Set/;
@@ -157,45 +156,45 @@ for(<FH>) { # Scan line by line
 	}
 }
 
-# sort funct3s together
+# sort same funct3 values together within each opcode
 for my $key (@seenOpcodes) {
 	my $arr = $dataOpcodes{$key};
 	@$arr = sort { $$a{hasFunct3} ? $$a{FUNCT3} <=> $$b{FUNCT3} : 0 } @$arr;
 }
 
 my $name = "empty";
-my $o = "";
-sub o {
+my $o = ""; # Build this string
+sub o { # Append a line to the output string with the given indentation
 	my ($i, $v) = @_;
 	if ($v) { $o .= ("    "x$i) . $v . "\n"; }
 	else { $o .= "\n"; }
 }
-sub closeSwitch {
+sub closeSwitch { # The end of every switch() statement is the same
 	my ($i, $alreadyBlanked) = @_;
-	o() unless ($alreadyBlanked);
+	o() unless ($alreadyBlanked); # Caller may suppress blank line
 	o($i+1, "default: {");
 	o($i+2, "// TODO REGISTER ERROR");
 	o($i+1, "} break;");
 	o($i,   "}");
 }
-sub closeSwitch7 {
+sub closeSwitch7 { # The end of the switch() for FUNCT7 is shaped a litle funny
 	my ($i) = @_;
 	closeSwitch($i+1, 1);
 	o($i,"} break;");
 }
 
-my $indentOpcode;
+my $anyOpcodes;
 o(0, "void $name(uint32_t instr) {");
-o(1, "switch(VREAD(instr, OPCODE)) {");
+o(1, "switch(VREAD(instr, OPCODE)) {"); # A tree of nested switches: First on opcode, then funct3/funct12, then funct7.
 for my $opcode (@seenOpcodes) {
-	if ($indentOpcode) { o(); } else { $indentOpcode = 1; }
+	if ($anyOpcodes) { o(); } else { $anyOpcodes = 1; }
 	o(2, "case $opcode: {");
 	my $instrs = $dataOpcodes{$opcode};
 	
 	@$instrs > 0 or die "How did you get here??";
 	my $firstInstr = $$instrs[0];
-	my $topFunct;
-	my $lastTopFunct;
+	my $topFunct; # Does this instruction use funct3/funct12? If so which one?
+	my $lastTopFunct; # If funct3/funct12 is used, what was its last value?
 	if ($$firstInstr{hasFunct3}) { $topFunct = "FUNCT3" }
 	elsif ($$firstInstr{hasFunct12}) { $topFunct = "FUNCT12" }
 
@@ -206,26 +205,27 @@ for my $opcode (@seenOpcodes) {
 		$i++;
 	}
 
-	for my $instr (@$instrs) {
+	for my $instr (@$instrs) { # For each of this opcode's instructions:
 		o() if $instr != $firstInstr;
-		if ($topFunct) {
+		if ($topFunct) { # Handle funct3/funct12
 			my $functValue = $$instr{$topFunct};
-			if ($lastTopFunct ne $functValue) {
-				if ($i > 4) {
+			# The funct3/funct12 will be different for each instruction UNLESS funct7 is in use.
+			if ($lastTopFunct ne $functValue) { # If the funct3/funct12 changed
+				if ($i > 4) { # Close off any funct7 switch we were building
 					closeSwitch7(4);
 					o();
 					$i = 4;
 				}
-				o($i, sprintf("case 0x%02x: {", $functValue));
+				o($i, sprintf("case 0x%02x: {", $functValue)); # New funct3 case
 				$i++;
 				if ($$instr{hasFunct7}) {
-					o($i, "switch (VREAD(instr, FUNCT7)) {");
+					o($i, "switch (VREAD(instr, FUNCT7)) {"); # Open new funct7 switch
 					$i++;
 				}
 				$lastTopFunct = $functValue;
 			}
 			if ($$instr{hasFunct7}) {
-				o($i, sprintf("case 0x%02x: {", $$instr{FUNCT7}));
+				o($i, sprintf("case 0x%02x: {", $$instr{FUNCT7})); # New funct7 case
 				$i++;
 			}
 		}
@@ -233,21 +233,21 @@ for my $opcode (@seenOpcodes) {
 		# CODE HERE
 		o($i, "// $$instr{instr}");
 
-		o(--$i, "} break;") if ($topFunct);
+		o(--$i, "} break;") if ($topFunct); # Could be closing a funct3, funct7 or funct12
 	}
 
-	if ($i > 4) {
+	if ($i > 4) { # The loop ended but we were still building a funct7. Close it off
 		o();
 		closeSwitch7(4);
 	}
 
-	if ($topFunct) {
+	if ($topFunct) { # Close off a funct3/funct12 switch
 		closeSwitch(3);
 	}
 
 	o(2, "} break;");
 }
-closeSwitch(1);
+closeSwitch(1); # Close opcode switch
 o(0, "}");
 
 print("$o\n");
