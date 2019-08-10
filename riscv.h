@@ -1,5 +1,8 @@
 #pragma once
 
+#include <cstdint>
+#include <cstddef>
+
 // Instruction shape
 
 // Bits filled out from diagram in riscv-spec unprivileged, 20190621-draft, sec 2.3
@@ -70,32 +73,21 @@
 #define IMMJ4    31
 #define IMMJ4_TO 31 
 
-#define VREAD(VAR, FIELD)
-#define VWRIT(VAR, FIELD, VALUE)
+#define MASK(V) ( (uint32_t)( (V) == 31 ? ~((uint32_t)0) : ( (V) == 0 ? 0 : (1<<(V))-1 ) ) )
+#define VREAD(VAR, FIELD) ( ((VAR) & ( MASK(FIELD##_TO) & ~MASK(FIELD) ) ) >> FIELD )
+#define VWRIT(VAR, FIELD, VALUE) VAR = ( ((VALUE) & MASK(FIELD##_TO - FIELD)) << FIELD )
+
+// Emulator state
+
+struct Emulator {
+	uint32_t reg[32]; // 0 is pc
+	uint8_t *memory;
+	size_t memoryLen;
+
+	Emulator(uint8_t _memoryLen);
+	void run(uint32_t instr);
+};
 
 // Opcodes
 
-// Generated using ./helper/opcode-map.pl from draft-20190621-ec4492f tex
-
-#define LOAD        0x03     // 3
-#define LOAD_FP     0x07     // 7
-#define MISC_MEM    0x0f     // 15
-#define OP_IMM      0x13     // 19
-#define AUIPC       0x17     // 23
-#define OP_IMM_32   0x1b     // 27
-#define STORE       0x23     // 35
-#define STORE_FP    0x27     // 39
-#define AMO         0x2f     // 47
-#define OP          0x33     // 51
-#define LUI         0x37     // 55
-#define OP_32       0x3b     // 59
-#define MADD        0x43     // 67
-#define MSUB        0x47     // 71
-#define NMSUB       0x4b     // 75
-#define NMADD       0x4f     // 79
-#define OP_FP       0x53     // 83
-#define BRANCH      0x63     // 99
-#define JALR        0x67     // 103
-#define JAL         0x6f     // 111
-#define SYSTEM      0x73     // 115
-
+#include "opcode.h"

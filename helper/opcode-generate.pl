@@ -2,14 +2,34 @@
 use strict;
 use sort 'stable'; # Needed for funny sort later
 
-# Argument is path to opcode-map.tex from https://github.com/riscv/riscv-isa-manual
-my ($path) = @ARGV;
+# Argument 0 is path to opcode-map.tex from https://github.com/riscv/riscv-isa-manual
+# Argument 1 is a C file where //! is treated as special, and content is snipped between the following:
+# //! PROLOGUE
+# //! END
+# //! METHOD
+# //! CONTENT
+# //! END
+# The PROLOGUE will be shoved at the top of the file. This will be followed by a function with signature METHOD.
+# CONTENT is interpreted in the following way:
+#     INSTRNAME:
+#         code goes here
+#     default:
+#         code goes here
+# Indentation is significant for CONTENT.
+
+my $tab = q[    ];
+
+my ($path, $input, $output, $opcode) = @ARGV;
 $path or die "Please give path to opcode-map.tex and instr-table.tex";
+$input or die "No input file given";
+$output or die "No output file given";
+$opcode or die "No opcode file given";
 
 my $tp;
 $tp = "$path/opcode-map.tex"; open(FH, $tp) or die "Couldn't open $tp";
 
-print("////// Paste into riscv.h //////\n\n");
+open(OUT, ">$opcode") or die "Couldn't open $opcode for write";
+print(OUT "#pragma once\n\n");
 
 my %opcodes = ();
 
@@ -32,7 +52,7 @@ for(<FH>) {
 				$value |= ( ($tabley - 2) << 5 ); # "inst[6:5]"
 				my $valuestr = sprintf("  0x%02x     // %d", $value, $value);
 
-				print("#define $opcode$opcodepad $valuestr\n");
+				print(OUT "#define $opcode$opcodepad $valuestr\n");
 				$opcodes{$value} = $opcode;
 			}
 		}
@@ -41,12 +61,63 @@ for(<FH>) {
 }
 
 close(FH);
-
-print("\n////// End riscv.h //////\n\n");
+close(OUT);
 
 $tp = "$path/instr-table.tex"; open(FH, $tp) or die "Couldn't open $tp";
+open(SOURCE, $input) or die "Couldn't open $input";
 
-print("////// Paste into main.c //////\n\n");
+sub hashWith { local $_; map { $_ => 1 } @_ }
+sub hashReverse { local $_; map { $_[$_] => $_ } (0..@_) }
+sub strim { local $_ = $_[0]; s/^\s*//s; s/\s*$//s; return $_ }
+
+my @sourceSections;
+my %sourceSectionNames = hashReverse(qw(PROLOGUE METHOD CONTENT));
+my $sourceSection;
+for(<SOURCE>) {
+	if (s/^\s*\/\/\s*\!(.*)$/$1/s) {
+		$_ = strim($_);
+		if ($_ eq "END") { $sourceSection = undef; }
+		elsif (exists($sourceSectionNames{$_})) { $sourceSection = $sourceSectionNames{$_} }
+	} elsif (defined($sourceSection)) {
+		$sourceSections[$sourceSection] .= $_;
+	}
+}
+
+open(OUT, ">$output") or die "Couldn't open $output for write";
+
+for (0,1) { $sourceSections[$_] = strim($sourceSections[$_]) }
+print(OUT sprintf("%s\n\n%s\n", $sourceSections[0], $sourceSections[1]));
+
+my ($contentPrefix, $labelStrip, $codeStrip); my %instructionCode;
+{ $sourceSections[1] =~ /([^\n\r]*)$/s; my $x = $1; $x =~ /^(\s*)/; $contentPrefix = $1; }
+
+{
+	my $name;
+	for my $line (split(/[\r\n|\n]/, $sourceSections[2])) {
+		if ($line =~ /^(\s*)(\S.*)$/s) {
+			my ($prefix, $content) = ($1,$2);
+			$content =~ s/\s+$//s;
+			if ($content =~ /^(\S+)\s*\:$/s and (not defined($labelStrip) or $prefix eq $labelStrip)) {
+				$name = $1;
+				$codeStrip = undef;
+			} else {
+				die qq[Stray line in CONTENT before first label: "$content"] if (not defined($name));
+
+				if (not defined($codeStrip)) {
+					die qq[Confusing indentation on this line in CONTENT:] if ($prefix !~ /^$labelStrip\s/s);
+					$codeStrip = $prefix;
+					$prefix = "";
+				} else {
+					$prefix =~ s/^$codeStrip//s;
+				}
+				$instructionCode{$name} .= "$prefix$content\n";
+			}
+		} elsif (defined($name)) {
+			$instructionCode{$name} .= "\n";
+		}
+	}
+}
+for my $key (keys %instructionCode) { $instructionCode{$key} =~ s/\s+$//s; }
 
 # R-type: 421111 (funct7, rs2, rs1, funct3, rd, opcode)
 # I-type: 61111 (imm[11:0], rs1, funct3, rd, opcode)
@@ -67,7 +138,6 @@ my %dataOpcodes = (); # Arrays of instruction data sorted by opcode
 # FENCE is a funny variant of "I" with further packing in the immediate
 # SYSTEM is formally I-type but all fields are constant except the immediate, which the manual describes as a "funct12".
 my %signatureIs = ("811" => "UJ", "61111" => "I", "421111" => "RSB", "2311111" => "FENCE");
-sub hashWith { map { $_ => 1 } @_ }
 my %hasFunct3 = hashWith(qw(R I S B FENCE));
 my %hasFunct7 = hashWith(qw(R));
 my %hasFunct12 = hashWith(qw(SYSTEM));
@@ -162,18 +232,32 @@ for my $key (@seenOpcodes) {
 	@$arr = sort { $$a{hasFunct3} ? $$a{FUNCT3} <=> $$b{FUNCT3} : 0 } @$arr;
 }
 
-my $name = "empty";
 my $o = ""; # Build this string
 sub o { # Append a line to the output string with the given indentation
 	my ($i, $v) = @_;
-	if ($v) { $o .= ("    "x$i) . $v . "\n"; }
+	if ($v) { $o .= $contentPrefix . ($tab x $i) . $v . "\n"; }
 	else { $o .= "\n"; }
+}
+sub instructionCode {
+	my ($i, $name, $noFirstLine) = @_;
+	if (exists($instructionCode{$name})) {
+		my $content = $instructionCode{$name};
+		if ($content) {
+			o() unless ($noFirstLine);
+			for my $line (split(/[\r\n|\n]/, $content)) {
+				o($i, $line);
+			}
+		}
+	} else {
+		o() unless ($noFirstLine);
+		o($i, "// WARNING: No implementation");
+	}
 }
 sub closeSwitch { # The end of every switch() statement is the same
 	my ($i, $alreadyBlanked) = @_;
 	o() unless ($alreadyBlanked); # Caller may suppress blank line
 	o($i+1, "default: {");
-	o($i+2, "// TODO REGISTER ERROR");
+	instructionCode($i+2, "default", 1);
 	o($i+1, "} break;");
 	o($i,   "}");
 }
@@ -184,11 +268,14 @@ sub closeSwitch7 { # The end of the switch() for FUNCT7 is shaped a litle funny
 }
 
 my $anyOpcodes;
-o(0, "void $name(uint32_t instr) {");
-o(1, "switch(VREAD(instr, OPCODE)) {"); # A tree of nested switches: First on opcode, then funct3/funct12, then funct7.
+
+if ($contentPrefix) { o(); }
+else { $contentPrefix = $tab; }
+
+o(0, "switch(VREAD(instr, OPCODE)) {"); # A tree of nested switches: First on opcode, then funct3/funct12, then funct7.
 for my $opcode (@seenOpcodes) {
 	if ($anyOpcodes) { o(); } else { $anyOpcodes = 1; }
-	o(2, "case $opcode: {");
+	o(1, "case $opcode: {");
 	my $instrs = $dataOpcodes{$opcode};
 	
 	@$instrs > 0 or die "How did you get here??";
@@ -198,7 +285,7 @@ for my $opcode (@seenOpcodes) {
 	if ($$firstInstr{hasFunct3}) { $topFunct = "FUNCT3" }
 	elsif ($$firstInstr{hasFunct12}) { $topFunct = "FUNCT12" }
 
-	my $i = 3;
+	my $i = 2;
 
 	if ($topFunct) {
 		o($i, "switch (VREAD(instr, $topFunct)) {");
@@ -211,10 +298,10 @@ for my $opcode (@seenOpcodes) {
 			my $functValue = $$instr{$topFunct};
 			# The funct3/funct12 will be different for each instruction UNLESS funct7 is in use.
 			if ($lastTopFunct ne $functValue) { # If the funct3/funct12 changed
-				if ($i > 4) { # Close off any funct7 switch we were building
-					closeSwitch7(4);
+				if ($i > 3) { # Close off any funct7 switch we were building
+					closeSwitch7(3);
 					o();
-					$i = 4;
+					$i = 3;
 				}
 				o($i, sprintf("case 0x%02x: {", $functValue)); # New funct3 case
 				$i++;
@@ -233,23 +320,25 @@ for my $opcode (@seenOpcodes) {
 		# CODE HERE
 		o($i, "// $$instr{instr}");
 
+		instructionCode($i, $$instr{instr});
+
 		o(--$i, "} break;") if ($topFunct); # Could be closing a funct3, funct7 or funct12
 	}
 
-	if ($i > 4) { # The loop ended but we were still building a funct7. Close it off
+	if ($i > 3) { # The loop ended but we were still building a funct7. Close it off
 		o();
-		closeSwitch7(4);
+		closeSwitch7(3);
 	}
 
 	if ($topFunct) { # Close off a funct3/funct12 switch
-		closeSwitch(3);
+		closeSwitch(2);
 	}
 
-	o(2, "} break;");
+	o(1, "} break;");
 }
-closeSwitch(1); # Close opcode switch
-o(0, "}");
+closeSwitch(0); # Close opcode switch
 
-print("$o\n");
+$o .= "}\n"; # Last thing close off METHOD. No prefix at all
 
-print("////// End main.c //////\n\n");
+print(OUT "$o\n");
+
