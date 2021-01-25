@@ -4,7 +4,7 @@ This is a WIP. You are not currently granted any rights to it.
 
 ## Status
 
-Currently the program only tests to verify it sees a load-unsigned-immediate. There is one test designed for use with this.
+Currently the program only tests to verify it sees a load-unsigned-immediate and prints the immediate value. There is one test designed for use with this.
 
 ## Tests
 
