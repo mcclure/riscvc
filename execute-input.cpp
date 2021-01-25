@@ -6,11 +6,14 @@
 //! END
 
 //! METHOD
+Emulator::Emulator(int memoryLen) {
+}
+
 void Emulator::run(uint32_t instr) {
 	int x;
 //! CONTENT
 	LUI:
-		printf("test\n");
+		printf("Load immediate: instr %x imm %x\n", instr, VREAD(instr, IMMI));
 	default:
 		printf("Bad instruction!\n");
 //! END

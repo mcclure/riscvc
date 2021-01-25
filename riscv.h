@@ -84,7 +84,7 @@ struct Emulator {
 	uint8_t *memory;
 	size_t memoryLen;
 
-	Emulator(uint8_t _memoryLen);
+	Emulator(int _memoryLen);
 	void run(uint32_t instr);
 };
 

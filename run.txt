@@ -1,0 +1,9 @@
+# Run once (paths will vary)
+# (I downloaded this copy of the ISA manual from the https://github.com/riscv/riscv-isa-manual releases page)
+
+mkdir build
+(cd build/ && cmake .. -DTEX_PATH=/Users/mcc/Downloads/riscv-isa-manual-draft-20190724-e871734/src)
+
+# Run to build
+
+(cd build/ && cmake --build .)
