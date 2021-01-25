@@ -4,7 +4,7 @@
 .globl _start
 _start:
 
-# Low order 3 nibbles unused
-.equ CONSTANT, 0xbeeef000
+# Single lui can only hold 5 nibbles
+.equ CONSTANT, 0xbeeef
 
-        li a0, CONSTANT
+        lui a0, CONSTANT
