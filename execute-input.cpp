@@ -13,7 +13,7 @@ void Emulator::run(uint32_t instr) {
 	int x;
 //! CONTENT
 	LUI:
-		printf("Load immediate: instr %x imm %x\n", instr, VREAD(instr, IMMI));
+		printf("Load immediate: instr %x imm %x\n", instr, VREAD(instr, IMMU));
 	default:
 		printf("Bad instruction!\n");
 //! END
